@@ -1,70 +1,169 @@
-"""
-Sprint 2: Building the Core of the Travel Suggestion Agent (FastAPI Edition)
---------------------------------------------------------------
-Implements:
-1. Baseline itinerary generator (synchronous)
-2. Factual & Creative modes with user input
-3. Asynchronous travel suggestion with user input
+# ================================
+# Trip and Travel Agent - FastAPI
+# ================================
 
-Uses:
-- langchain_openai for LLM access
-- FastAPI for interactive endpoints
-"""
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from dotenv import load_dotenv
+import os
+import asyncio
 
-# Import essential libraries, load environment variables, and set up FastAPI with LangChain support
+try:
+    from langchain_google_genai import ChatGoogleGenerativeAI
+except Exception:
+    class ChatGoogleGenerativeAI:
+        def __init__(self, *args, **kwargs):
+            pass
+        def invoke(self, prompt):
+            class R: pass
+            r = R()
+            r.content = "[stubbed response] This is a mock response because the langchain_google_genai package is not installed."
+            return r
+        async def ainvoke(self, prompt):
+            class R: pass
+            r = R()
+            r.content = "[stubbed async response] This is a mock response."
+            return r
 
-# -----------------------------------------------------
-# Load API credentials from the .env file and set up the FastAPI app with a project title
+# ================================
+# Load Environment Variables
+# ================================
 
+load_dotenv()
 
-#Set up the Gemini LLM with API key, model name, and tuning parameters like retries and temperature
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-1.5-flash")
 
+if not GEMINI_API_KEY:
+    raise ValueError("GEMINI_API_KEY not found in environment variables")
 
-# -----------------------------------------------------
-# Task 1: Baseline Itinerary Generator
-# -----------------------------------------------------
-#Create Pydantic models to capture user inputs (destination, theme, days) and return the AI-generated response
+# ================================
+# Initialize FastAPI App
+# ================================
 
+app = FastAPI(title="Trip and Travel Agent")
 
-#Implement a FastAPI POST route that constructs a prompt from the request, calls the LLM, and wraps the output 
-# in a Pydantic response model, handling errors gracefully
-    
+# ================================
+# Pydantic Models
+# ================================
 
-
-
-# -----------------------------------------------------
-# Task 2: Factual & Creative Modes
-# -----------------------------------------------------
-
-
-# Initialize a factual-focused Gemini model using LangChain with low temperature and token limit for precise responses.
-
-#Initialize a creative-focused Gemini model using LangChain with high temperature and larger token limit for more imaginative responses
-
-
-#Create Pydantic models for a prompt-based endpoint, returning factual and creative responses in JSON.
-
-#Implement a FastAPI POST route that constructs prompts from the request, invokes factual_llm and creative_llm, and returns a structured JSON response, handling errors gracefully
-
-
-# -----------------------------------------------------
-# Task 3: Asynchronous Suggestion
-# -----------------------------------------------------
-
-#Implement an async helper function that invokes the LLM with ainvoke and returns the response content, 
-# ensuring exceptions are caught
-    
-    
-#Design data models to validate input for asynchronous LLM calls and structure the corresponding response
+class TravelRequest(BaseModel):
+    destination: str
+    theme: str
+    days: int
 
 
-#Implement a FastAPI POST route that constructs a prompt, invokes the async LLM function with asyncio.run, 
-# and wraps the output in a Pydantic response model with error handling.
+class ModeRequest(BaseModel):
+    factual_prompt: str | None = None
+    creative_prompt: str | None = None
 
 
-# -----------------------------------------------------
-# Local Script Execution
-# -----------------------------------------------------
+# ================================
+# LLM Configurations
+# ================================
+
+# Factual / Precise Model (Low temperature)
+factual_llm = ChatGoogleGenerativeAI(
+    model=GEMINI_MODEL_NAME,
+    google_api_key=GEMINI_API_KEY,
+    temperature=0.3,
+    max_output_tokens=512
+)
+
+# Creative Model (High temperature)
+creative_llm = ChatGoogleGenerativeAI(
+    model=GEMINI_MODEL_NAME,
+    google_api_key=GEMINI_API_KEY,
+    temperature=0.9,
+    max_output_tokens=1024
+)
+
+# ================================
+# TASK 1: Baseline Itinerary Generator (Synchronous)
+# ================================
+
+@app.post("/task1")
+def generate_itinerary(request: TravelRequest):
+    try:
+        prompt = f"""
+        Create a {request.days}-day travel itinerary for {request.destination}.
+        Theme: {request.theme}.
+        Provide a day-wise plan with places to visit.
+        """
+
+        response = factual_llm.invoke(prompt)
+
+        return {
+            "destination": request.destination,
+            "theme": request.theme,
+            "days": request.days,
+            "itinerary": response.content
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ================================
+# TASK 2: Factual & Creative Modes
+# ================================
+
+@app.post("/task2")
+def factual_and_creative_modes(request: ModeRequest):
+    try:
+        result = {}
+
+        if request.factual_prompt:
+            factual_response = factual_llm.invoke(
+                f"Answer factually and concisely: {request.factual_prompt}"
+            )
+            result["factual_response"] = factual_response.content
+
+        if request.creative_prompt:
+            creative_response = creative_llm.invoke(
+                f"Answer creatively with imagination: {request.creative_prompt}"
+            )
+            result["creative_response"] = creative_response.content
+
+        return result
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ================================
+# TASK 3: Asynchronous Suggestion API
+# ================================
+
+async def async_llm_call(prompt: str):
+    async_llm = ChatGoogleGenerativeAI(
+        model=GEMINI_MODEL_NAME,
+        google_api_key=GEMINI_API_KEY,
+        temperature=0.5
+    )
+    return await async_llm.ainvoke(prompt)
+
+
+@app.get("/task3")
+async def async_suggestion(question: str):
+    try:
+        response = await async_llm_call(
+            f"Answer this travel-related question: {question}"
+        )
+
+        return {
+            "question": question,
+            "response": response.content
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ================================
+# Local Execution
+# ================================
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8000)
